@@ -47,6 +47,10 @@ class Fondo {
   setMappedSpeed(speed) {
     this.mappedSpeed = speed;
   }
+
+  changeGradient() {
+    this.redGradient = !this.redGradient;
+  }
 }
 
 // Clase para manejar los óvalos que pueden vibrar
@@ -56,7 +60,7 @@ class Oval {
     this.y = y;
     this.vibrate = false; // Añadimos una propiedad para la vibración
     this.isPink = isPink; // Propiedad para determinar si es rosa claro
-    this.color = isPink ? color(255, 182, 193, 128) : color(255, 255, 255, 128); // Rosa claro transparente o blanco transparente
+    this.color = isPink ? color(255, 182, 193, 128) : color(200, 200, 200, 128); // Rosa claro transparente o gris medio transparente
     this.vibrationAmplitude = 0; // Amplitud de la vibración basada en la amplitud del sonido
   }
 
@@ -84,6 +88,9 @@ let fondo; // Variable global para el fondo
 let ovals = []; // Array de óvalos
 let mic; // Objeto para manejar la entrada de audio
 let fft; // Objeto para manejar el análisis de la frecuencia
+let bassHighDuration = 0; // Duración de alta energía de bajos
+let bassHighThreshold = 100; // Umbral para considerar que la energía de bajos es alta
+let bassHighTime = 60; // Tiempo que debe mantenerse la energía de bajos alta para cambiar el color (en frames)
 
 function setup() {
   createCanvas(345, 457); // Tamaño del lienzo
@@ -121,7 +128,7 @@ function populateOvals() {
   while (ovals.length < numOvals && attempts < maxAttempts) {
     let x = random(margin, width - margin);
     let y = random(margin, height - margin);
-    let isPink = random() < 0.1; // 10% de probabilidad de ser rosa claro
+    let isPink = ovals.length % 2 === 0; // Alternar entre rosa y gris
     let newOval = new Oval(x, y, isPink);
 
     if (!isTouching(newOval)) {
@@ -146,38 +153,105 @@ function isTouching(newOval) {
 function checkMicInput() {
   let micLevel = mic.getLevel(); // Obtener el nivel de audio actual
   let spectrum = fft.analyze(); // Analizar el espectro de frecuencias
-  let freqIndex = fft.getEnergy("treble"); // Obtener la energía de las frecuencias altas
+  let trebleEnergy = fft.getEnergy("treble"); // Obtener la energía de las frecuencias altas
+  let bassEnergy = fft.getEnergy("bass"); // Obtener la energía de las frecuencias bajas
+  let midEnergy = fft.getEnergy("mid"); // Obtener la energía de las frecuencias medias
 
+  // Manejar los controles por separado
+  handleMicLevel(micLevel);
+  handleBassEnergy(bassEnergy);
+  handleTrebleEnergy(trebleEnergy);
+  handleMidEnergy(midEnergy); // Nuevo manejo para frecuencias medias
+}
+
+// Función para manejar el nivel de micrófono
+function handleMicLevel(micLevel) {
   // Ajustar el mapeo para mayor sensibilidad
   let mappedVibration = map(micLevel, 0, 0.1, 0, 5); // Reducir el rango de entrada para mayor sensibilidad
-  let mappedSpeed = map(freqIndex, 0, 255, 0.01, 0.1); // Mapear la frecuencia a un rango adecuado para la velocidad del degradado
 
   if (micLevel > 0.01) { // Reducir el umbral para activar efectos
-    activateEffects(mappedVibration, mappedSpeed);
+    activateEffects(mappedVibration);
   } else {
     deactivateEffects();
   }
 }
 
-// Activar efectos cuando se detecta un sonido
-function activateEffects(mappedVibration, mappedSpeed) {
-  for (let oval of ovals) {
-    oval.vibrate = true; // Activar vibración
-    oval.setVibrationAmplitude(mappedVibration); // Ajustar la amplitud de la vibración
-  }
+// Función para manejar la energía de los bajos
+function handleBassEnergy(bassEnergy) {
+  // Ajustar el mapeo para mayor sensibilidad
+  let mappedVibration = map(bassEnergy, 0, 255, 0, 5); // Reducir el rango de entrada para mayor sensibilidad
 
+  if (bassEnergy > 150) { // Umbral para activar la vibración, ajustado a 150 para mayor sensibilidad
+    activateVibration(mappedVibration);
+    bassHighDuration++;
+    if (bassHighDuration > bassHighTime) {
+      changeOvalsColor(color(0, 0, 255, 128)); // Cambiar el color a azul transparente
+      bassHighDuration = 0; // Resetear el contador después de cambiar el color
+    }
+  } else {
+    deactivateVibration();
+    bassHighDuration = 0; // Resetear el contador si la energía de bajos baja
+  }
+}
+
+// Función para manejar la energía de los agudos
+function handleTrebleEnergy(trebleEnergy) {
+  // Ajustar el mapeo para mayor sensibilidad
+  let mappedSpeed = map(trebleEnergy, 0, 255, 0.01, 0.1); // Mapear la frecuencia a un rango adecuado para la velocidad del degradado
+
+  if (trebleEnergy > 150) { // Umbral para activar el cambio de degradado, ajustado a 150 para mayor sensibilidad
+    fondo.changeGradient();
+    fondo.setMappedSpeed(mappedSpeed); // Ajustar la velocidad del degradado
+  } else {
+    fondo.setMappedSpeed(0.01); // Resetear la velocidad del degradado a su valor por defecto
+  }
+}
+
+// Función para manejar la energía de las frecuencias medias
+function handleMidEnergy(midEnergy) {
+  if (midEnergy > 150) { // Umbral para activar el cambio de color
+    // Generar un color aleatorio entre gris y rosa claro
+    let newColor;
+    if (random(1) < 0.5) {
+      newColor = color(200, 200, 200, 128); // Gris
+    } else {
+      newColor = color(255, 182, 193); // Rosa claro
+    }
+    
+    changeOvalsColor(newColor); // Cambiar el color
+  }
+}
+
+// Activar efectos cuando se detecta un sonido
+function activateEffects(mappedVibration) {
   fondo.setMoveUp(true); // Activar movimiento del degradado
-  fondo.setMappedSpeed(mappedSpeed); // Ajustar la velocidad del degradado
 }
 
 // Desactivar efectos cuando no se detecta un sonido
 function deactivateEffects() {
+  fondo.setMoveUp(false); // Desactivar movimiento del degradado
+}
+
+// Activar vibración de los óvalos
+function activateVibration(mappedVibration) {
+  for (let oval of ovals) {
+    oval.vibrate = true; // Activar vibración
+    oval.setVibrationAmplitude(mappedVibration); // Ajustar la amplitud de la vibración
+  }
+}
+
+// Desactivar vibración de los óvalos
+function deactivateVibration() {
   for (let oval of ovals) {
     oval.vibrate = false; // Desactivar vibración
   }
+}
 
-  fondo.setMoveUp(false); // Desactivar movimiento del degradado
-  fondo.setMappedSpeed(0.01); // Resetear la velocidad del degradado a su valor por defecto
+// Cambiar el color de los óvalos
+function changeOvalsColor(newColor) {
+  for (let oval of ovals) {
+    oval.color = newColor; // Cambiar el color según el nuevo color
+  }
 }
 
 
